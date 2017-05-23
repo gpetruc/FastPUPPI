@@ -111,6 +111,21 @@ namespace {
                 }
                 return mysum;
             }
+            int number(float dr, float threshold) const { 
+                float dr2 = dr*dr, absthreshold = sum()*threshold;
+                int mysum = 0;
+                for (const auto & p : ptdr2) {
+                    if (p.second < dr2 && p.first > absthreshold) mysum++;
+                }
+                return mysum;
+            }
+            float mindr(float threshold) const {
+                float best = 9999, absthreshold = sum()*threshold;
+                for (const auto & p : ptdr2) {
+                    if (p.second < best && p.first > absthreshold) best = p.second;
+                }
+                return std::sqrt(best);
+            }
             float nearest() const {
                 std::pair<float,float> best(0,9999);
                 for (const auto & p : ptdr2) {
@@ -153,6 +168,7 @@ class ResponseNTuplizer : public edm::one::EDAnalyzer<edm::one::SharedResources,
       edm::EDGetTokenT<std::vector<reco::GenParticle>> genparticles_;
       bool isParticleGun_;
       std::unique_ptr<TRandom> random_;
+      bool doRandom_;
       TTree *tree_;
       uint32_t run_, lumi_; uint64_t event_;
       struct McVars {
@@ -188,12 +204,15 @@ class ResponseNTuplizer : public edm::one::EDAnalyzer<edm::one::SharedResources,
 
       } mc_;
       struct RecoVars {
-         float pt, pt02, ptbest, pthighest;
+         float pt, pt02, ptbest, pthighest, mindr025; int n025, n010;
          void makeBranches(const std::string &prefix, TTree *tree) {
              tree->Branch((prefix+"_pt").c_str(),   &pt,   (prefix+"_pt/F").c_str());
              tree->Branch((prefix+"_pt02").c_str(), &pt02, (prefix+"_pt02/F").c_str());
              tree->Branch((prefix+"_ptbest").c_str(), &ptbest, (prefix+"_ptbest/F").c_str());
              tree->Branch((prefix+"_pthighest").c_str(), &pthighest, (prefix+"_pthighest/F").c_str());
+             tree->Branch((prefix+"_mindr025").c_str(), &mindr025, (prefix+"_mindr025/F").c_str());
+             tree->Branch((prefix+"_n025").c_str(), &n025, (prefix+"_n025/I").c_str());
+             tree->Branch((prefix+"_n010").c_str(), &n010, (prefix+"_n010/I").c_str());
          }
          void fill(const std::vector<::SimpleObject> & objects, float eta, float phi) {
              ::InCone incone(objects, eta, phi, 0.4);
@@ -201,6 +220,9 @@ class ResponseNTuplizer : public edm::one::EDAnalyzer<edm::one::SharedResources,
              pt02 = incone.sum(0.2);
              ptbest = incone.nearest();
              pthighest = incone.max();
+             mindr025 =  incone.mindr(0.25);
+             n025 = incone.number(0.2, 0.25);
+             n010 = incone.number(0.2, 0.10);
          }
       };
       std::vector<std::pair<::MultiCollection,RecoVars>> reco_;
@@ -233,7 +255,7 @@ ResponseNTuplizer::ResponseNTuplizer(const edm::ParameterSet& iConfig) :
     genjets_(consumes<std::vector<reco::GenJet>>(iConfig.getParameter<edm::InputTag>("genJets"))),
     genparticles_(consumes<std::vector<reco::GenParticle>>(iConfig.getParameter<edm::InputTag>("genParticles"))),
     isParticleGun_(iConfig.getParameter<bool>("isParticleGun")),
-    random_(new TRandom3())
+    random_(new TRandom3()), doRandom_(iConfig.getParameter<bool>("doRandom"))
 {
     usesResource("TFileService");
     edm::Service<TFileService> fs;
@@ -364,33 +386,35 @@ ResponseNTuplizer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
         tree_->Fill();
     }
     // now let's throw a few "random" cones
-    for (int icone = 0; icone < 7; ++icone) {
-        mc_.pt  = 10;
-        mc_.eta = random_->Rndm() * 10 - 5;
-        mc_.phi = M_PI*(random_->Rndm() * 2 - 1);
-        mc_.id = 999;
-        mc_.iso02 = 0;
-        mc_.iso04 = 0;
-        bool badcone = false;
-        for (const reco::GenParticle &gen : *genparticles) {
-            if ((gen.isPromptFinalState() || gen.isDirectPromptTauDecayProductFinalState()) && gen.pt() > 0.5) {
-                if (::deltaR2(mc_.eta,mc_.phi,gen.eta(),gen.phi()) < 0.36f) {
+    if (doRandom_) {
+        for (int icone = 0; icone < 7; ++icone) {
+            mc_.pt  = 10;
+            mc_.eta = random_->Rndm() * 10 - 5;
+            mc_.phi = M_PI*(random_->Rndm() * 2 - 1);
+            mc_.id = 999;
+            mc_.iso02 = 0;
+            mc_.iso04 = 0;
+            bool badcone = false;
+            for (const reco::GenParticle &gen : *genparticles) {
+                if ((gen.isPromptFinalState() || gen.isDirectPromptTauDecayProductFinalState()) && gen.pt() > 0.5) {
+                    if (::deltaR2(mc_.eta,mc_.phi,gen.eta(),gen.phi()) < 0.36f) {
+                        badcone = true; break;
+                    }
+                }
+            }
+            if (badcone) continue;
+            for (const reco::GenJet & j : *genjets) {
+                if (j.pt() > 5 && ::deltaR2(mc_.eta,mc_.phi,j.eta(),j.phi()) < 0.64f) {
                     badcone = true; break;
                 }
             }
-        }
-        if (badcone) continue;
-        for (const reco::GenJet & j : *genjets) {
-            if (j.pt() > 5 && ::deltaR2(mc_.eta,mc_.phi,j.eta(),j.phi()) < 0.64f) {
-                badcone = true; break;
+            if (badcone) continue;
+            for (auto & recopair : reco_) {
+                recopair.second.fill(recopair.first.objects(), mc_.eta, mc_.phi);
             }
-        }
-        if (badcone) continue;
-        for (auto & recopair : reco_) {
-            recopair.second.fill(recopair.first.objects(), mc_.eta, mc_.phi);
-        }
-        tree_->Fill();
+            tree_->Fill();
 
+        }
     }
     for (auto & recopair : reco_) {
         recopair.first.clear();
