@@ -8,11 +8,15 @@
 <use name="DataFormats/METReco"/>
 <use name="DataFormats/Math"/>
 <use name="DataFormats/NanoAOD"/>
-<use name="DataFormats/Phase2L1ParticleFlow"/>
+<use name="DataFormats/L1THGCal"/>
+<use name="DataFormats/L1TParticleFlow"/>
 <use name="FWCore/Framework"/>
 <use name="FWCore/ParameterSet"/>
 <use name="FWCore/ServiceRegistry"/>
 <use name="L1Trigger/Phase2L1ParticleFlow"/>
 <use name="MagneticField/Engine"/>
 <use name="MagneticField/Records"/>
+<use name="Geometry/Records"/>
+<use name="L1Trigger/L1THGCal"/>
+<use name="fastjet"/>
 <flags EDM_PLUGIN="1"/>

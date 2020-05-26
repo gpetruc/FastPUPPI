@@ -24,12 +24,22 @@ elif [[ "$1" == "--110X_v0" ]]; then
         sed -e 's+Phase2C8+Phase2C9+g' -e 's+GeometryExtended2026D41+GeometryExtended2026D49+' ${CODE}.py > ${CODE/_106X/}_110X.py;
         CODE=${CODE/_106X/}_110X
     fi
-
+elif [[ "$1" == "--110X_v0_fat" ]]; then
+    shift;
+    MAIN=/eos/cms/store/cmst3/group/l1tr/gpetrucc/11_1_X/NewInputs110X/280420_fat.done/$1
+    PREFIX="inputs110X_"
+    if echo $CODE | grep -q 110X; then
+        echo "Assume $CODE is ready for 110X";
+    else
+        echo "Convert ${CODE}.py to ${CODE/_106X/}_110X.py automatically updating era and geometry";
+        sed -e 's+Phase2C8+Phase2C9+g' -e 's+GeometryExtended2026D41+GeometryExtended2026D49+' ${CODE}.py > ${CODE/_106X/}_110X.py;
+        CODE=${CODE/_106X/}_110X
+    fi
 else 
     echo "You mush specify the version of the input samples to run on "
     echo "   --106X_v0 : 106X L1T MC inputs, with default HGCal TPs "
     echo "   --110X_v0 : 110X HLT MC inputs, with default HGCal TPs "
-
+    exit 1
 fi;
  
 if [[ "$L1TPF_LOCAL_INPUT_DIR" != "" ]] && test -d $L1TPF_LOCAL_INPUT_DIR; then

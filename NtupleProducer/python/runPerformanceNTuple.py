@@ -260,6 +260,8 @@ if True:
     process.ntuple.objects.PhGenAcc_sel = cms.string("pdgId == 22")
     process.ntuple.objects.MuGenAcc = cms.VInputTag(cms.InputTag("genInAcceptance"))
     process.ntuple.objects.MuGenAcc_sel = cms.string("abs(pdgId) == 13")
+    process.ntuple.objects.HGCGenAcc = cms.VInputTag(cms.InputTag("genInAcceptance"))
+    process.ntuple.objects.HGCGenAcc_sel = cms.string("abs(eta) > 1.6 && abs(eta) < 2.8")
     process.extraPFStuff.add(process.genInAcceptance)
 if False: # test also PF leptons
     process.ntuple.objects.L1PFMuon = cms.VInputTag("l1pfCandidates:PF",)
@@ -348,6 +350,136 @@ def addTKs():
     monitorPerf("L1TKV6", "l1tkv6Stubs", makeRespSplit = False)
     monitorPerf("L1TK", "l1pfCandidates:TK", makeRespSplit = False)
     monitorPerf("L1TKV", "l1pfCandidates:TKVtx", makeRespSplit = False)
+def testHGC():
+    process.source.inputCommands.append("drop l1tHGCalTriggerSumsBXVector_hgcalConcentratorProducer_HGCalConcentratorProcessorSelection_IN")
+    process.load("SimCalorimetry.HGCalSimProducers.hgcalDigitizer_cfi") # needed by the below
+    process.load("L1Trigger.L1THGCal.hgcalTriggerPrimitives_cff")
+    process.extraPFStuff.add(process.hgcalBackEndLayer1Producer)
+    process.ntuple.objects.L1HGCal2D = cms.VInputTag(cms.InputTag("hgcalBackEndLayer1Producer","HGCalBackendLayer1Processor2DClustering"))
+    process.hgcalBackEndLayer2ProducerAKT12 = cms.EDProducer("FastJetHGCalClusters",
+            src = cms.InputTag("hgcalBackEndLayer1Producer","HGCalBackendLayer1Processor2DClustering"),
+            algo = cms.string("anti-kt"),
+            R = cms.double(0.12),
+            ptMin = cms.double(0.5),
+            cut = cms.string("pt > 1 || hOverE < 0.3"),
+            shape_distance = cms.double(0.015),
+            shape_threshold = cms.double(1.0),
+    )
+    process.hgcalBackEndLayer2ProducerS0 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerS0.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 0.5
+    process.hgcalBackEndLayer2ProducerT2 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerT2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 0.5
+    process.hgcalBackEndLayer2ProducerT2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.binSumsHisto = cms.vuint32(
+         3,  3,  3,  3, 3, 3, 3, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    )
+    process.hgcalBackEndLayer2ProducerRef = process.hgcalBackEndLayer2Producer.clone()
+    process.extraPFStuff.add(process.hgcalBackEndLayer2ProducerAKT12,process.hgcalBackEndLayer2ProducerS0,process.hgcalBackEndLayer2ProducerT2,process.hgcalBackEndLayer2ProducerRef)
+    process.load("L1Trigger.Phase2L1ParticleFlow.pfClustersFromHGC3DClustersEM_cfi")
+    for post in "Ref", "AKT12", "S0", "T2":
+        tag = cms.InputTag("hgcalBackEndLayer2Producer"+post, "" if "AKT" in post else "HGCalBackendLayer2Processor3DClustering")
+        setattr(process.ntuple.objects, "L1HGCal3D"+post, cms.VInputTag(tag))
+        # unclustered energy (for performance study)
+        unclust = cms.EDProducer("HGCalUnclustered", 
+                        src2D = cms.InputTag("hgcalBackEndLayer1Producer","HGCalBackendLayer1Processor2DClustering"), 
+                        src3D = tag,
+                        cut   = cms.string("")#pt > 1  || (pt > 0.5 && hOverE < 0.3)")
+                    )
+        setattr(process, "HGCUnclustered%s" % post, unclust)
+        setattr(process.ntuple.objects, "L1HGCal3D"+post+"Unclust", cms.VInputTag(cms.InputTag("HGCUnclustered%s" % post)))
+        # em raw (needed for calibration)
+        emraw = process.pfClustersFromHGC3DClustersEM.clone(src = tag, corrector = "")
+        emraw.emVsPUID.wp = "-999.0"
+        setattr(process, "pfClustersFromHGC3DClusters%sEMRaw" % post, emraw)
+        setattr(process.ntuple.objects, "L1HGCal3D"+post+"EMRaw", cms.VInputTag(cms.InputTag("pfClustersFromHGC3DClusters%sEMRaw" % post)))
+        # calibrated 3D clusters
+        corr3d = process.pfClustersFromHGC3DClusters.clone(src = tag, 
+                    corrector = process.pfClustersFromHGC3DClusters.corrector.value().replace("HGCal3D_TC","HGCal3D_"+post)
+                 )
+        corr3d.emVsPUID.wp = "-999.0"
+        setattr(process, "pfClustersFromHGC3DClusters%s" % post, corr3d)
+        setattr(process.ntuple.objects, "L1HGCal3D"+post+"Corr", cms.VInputTag(cms.InputTag("pfClustersFromHGC3DClusters%s" % post)))
+        # pf
+        pftk = process.l1pfProducerHGCal.clone(hadClusters = ["pfClustersFromHGC3DClusters%s" % post])
+        pfnotk = process.l1pfProducerHGCalNoTK.clone(hadClusters = ["pfClustersFromHGC3DClusters%s" % post])
+        setattr(process, "l1pfProducerHGCal%s" % post, pftk)
+        setattr(process, "l1pfProducerHGCalNoTK%s" % post, pfnotk)
+        # Merging all outputs
+        pfmerge = cms.EDProducer("L1TPFCandMultiMerger",
+                        pfProducers = cms.VInputTag(
+                            cms.InputTag("l1pfProducerBarrel"), 
+                            cms.InputTag("l1pfProducerHGCal%s" % post),
+                            cms.InputTag("l1pfProducerHGCalNoTK%s" % post),
+                            cms.InputTag("l1pfProducerHF")
+                            ),
+                        labelsToMerge = cms.vstring("Calo", "PF", "Puppi"),
+                  )
+        setattr(process, "l1pfCandidates%s" % post, pfmerge)
+        # add elements to sequence
+        process.extraPFStuff.add(unclust, emraw, corr3d, pftk, pfnotk, pfmerge)
+        monitorPerf("L1Calo"+post,  "l1pfCandidates%s:Calo" % post)
+        monitorPerf("L1PF"+post,    "l1pfCandidates%s:PF" % post)
+        monitorPerf("L1Puppi"+post, "l1pfCandidates%s:Puppi" % post)
+def debugHGC():
+    process.source.inputCommands.append("drop l1tHGCalTriggerSumsBXVector_hgcalConcentratorProducer_HGCalConcentratorProcessorSelection_IN")
+    process.load("SimCalorimetry.HGCalSimProducers.hgcalDigitizer_cfi") # needed by the below
+    process.load("L1Trigger.L1THGCal.hgcalTriggerPrimitives_cff")
+    process.ntuple.objects.L1HGCalTC = cms.VInputTag(cms.InputTag("hgcalConcentratorProducer","HGCalConcentratorProcessorSelection"))
+    process.ntuple.objects.L1HGCal3D = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2Producer", "HGCalBackendLayer2Processor3DClustering"))
+    process.ntuple.objects.L1HGCal2D = cms.VInputTag(cms.InputTag("hgcalBackEndLayer1Producer","HGCalBackendLayer1Processor2DClustering"))
+    process.extraPFStuff.add(process.hgcalBackEndLayer1Producer)
+    c3dakt = cms.EDProducer("FastJetHGCalClusters",
+            src = cms.InputTag("hgcalBackEndLayer1Producer","HGCalBackendLayer1Processor2DClustering"),
+            algo = cms.string("anti-kt"),
+            R = cms.double(0.1),
+            ptMin = cms.double(0.5),
+            cut = cms.string("pt > 1 || hOverE < 0.3"),
+            shape_distance = cms.double(0.015),
+            shape_threshold = cms.double(1.0),
+    )
+    for R in 0.07, 0.12, 0.2: #0.050, 0.070, 0.100, 0.120, 0.150, 0.200, 0.250:
+        RRR = "%03d" % int(R*1000)
+        mod = c3dakt.clone(R = R)
+        setattr(process, "c3dakt"+RRR, mod);
+        process.extraPFStuff.add(mod)
+        setattr(process.ntuple.objects, "L1HGCalAKT"+RRR, cms.VInputTag(cms.InputTag("c3dakt"+RRR)))
+        setattr(process.ntuple.objects, "L1HGCalAKT"+RRR+"ptCut", cms.VInputTag(cms.InputTag("c3dakt"+RRR)))
+        setattr(process.ntuple.objects, "L1HGCalAKT"+RRR+"ptCut_sel", cms.string("pt > 2 || (hOverE < 0.3 && pt > 1)"))
+    process.hgcalBackEndLayer2ProducerS0 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerS0.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 0.5
+    process.hgcalBackEndLayer2ProducerS1 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerS1.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 1.0
+    process.hgcalBackEndLayer2ProducerS2 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerS2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 2.0
+    process.extraPFStuff.add(process.hgcalBackEndLayer2ProducerS0,process.hgcalBackEndLayer2ProducerS1,process.hgcalBackEndLayer2ProducerS2)
+    process.ntuple.objects.L1HGCal3DS0 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerS0", "HGCalBackendLayer2Processor3DClustering"))
+    process.ntuple.objects.L1HGCal3DS1 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerS1", "HGCalBackendLayer2Processor3DClustering"))
+    process.ntuple.objects.L1HGCal3DS2 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerS2", "HGCalBackendLayer2Processor3DClustering"))
+    process.hgcalBackEndLayer2ProducerT1 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerT1.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 0.5
+    process.hgcalBackEndLayer2ProducerT1.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.binSumsHisto = cms.vuint32(
+         5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    )
+    process.hgcalBackEndLayer2ProducerT1S1 = process.hgcalBackEndLayer2ProducerT1.clone()
+    process.hgcalBackEndLayer2ProducerT1S1.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 1.0
+    process.hgcalBackEndLayer2ProducerT1S2 = process.hgcalBackEndLayer2ProducerT1.clone()
+    process.hgcalBackEndLayer2ProducerT1S2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 2.0
+    process.extraPFStuff.add(process.hgcalBackEndLayer2ProducerT1,process.hgcalBackEndLayer2ProducerT1S1,process.hgcalBackEndLayer2ProducerT1S2)
+    process.ntuple.objects.L1HGCal3DT1   = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerT1", "HGCalBackendLayer2Processor3DClustering"))
+    #process.ntuple.objects.L1HGCal3DT1S1 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerT1S1", "HGCalBackendLayer2Processor3DClustering"))
+    #process.ntuple.objects.L1HGCal3DT1S2 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerT1S2", "HGCalBackendLayer2Processor3DClustering"))
+    process.hgcalBackEndLayer2ProducerT2 = process.hgcalBackEndLayer2Producer.clone()
+    process.hgcalBackEndLayer2ProducerT2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 0.5
+    process.hgcalBackEndLayer2ProducerT2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.binSumsHisto = cms.vuint32(
+         3,  3,  3,  3, 3, 3, 3, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    )
+    process.hgcalBackEndLayer2ProducerT2S1 = process.hgcalBackEndLayer2ProducerT2.clone()
+    process.hgcalBackEndLayer2ProducerT2S1.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 1.0
+    process.hgcalBackEndLayer2ProducerT2S2 = process.hgcalBackEndLayer2ProducerT2.clone()
+    process.hgcalBackEndLayer2ProducerT2S2.ProcessorParameters.C3d_parameters.histoMax_C3d_seeding_parameters.threshold_histo_multicluster = 2.0
+    process.extraPFStuff.add(process.hgcalBackEndLayer2ProducerT2,process.hgcalBackEndLayer2ProducerT2S1,process.hgcalBackEndLayer2ProducerT2S2)
+    process.ntuple.objects.L1HGCal3DT2   = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerT2", "HGCalBackendLayer2Processor3DClustering"))
+    #process.ntuple.objects.L1HGCal3DT2S1 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerT2S1", "HGCalBackendLayer2Processor3DClustering"))
+    #process.ntuple.objects.L1HGCal3DT2S2 = cms.VInputTag(cms.InputTag("hgcalBackEndLayer2ProducerT2S2", "HGCalBackendLayer2Processor3DClustering"))
 def addCalib():
     process.load("L1Trigger.Phase2L1ParticleFlow.pfClustersFromHGC3DClustersEM_cfi")
     process.pfClustersFromL1EGClustersRaw    = process.pfClustersFromL1EGClusters.clone(corrector = "")
