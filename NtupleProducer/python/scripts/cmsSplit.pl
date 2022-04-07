@@ -313,6 +313,7 @@ foreach (@pythonFileInfo) {
             $mergeNano{$module} = {'outfile'=>$ofile, 'infiles'=>[]};
         }
     } elsif ($otype eq "Dump") {
+        $ofile =~ s/\.dump$/$label.".dump"/e;
         push @dumpModules, [$module,$file];
         print "Found enabled $otype output module $module producing $file\n" if $verbose > 0;
         unless ($nomerge) {
