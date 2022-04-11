@@ -44,7 +44,7 @@ class JetDumperHelper {
             edm::Handle<edm::View<l1t::PFJet>> src;
             iEvent.getByToken(src_, src);
             std::vector<uint64_t> data(1, 0u); // leave one empty word at the beginning
-            for (auto & c : *src) {
+            for (l1t::PFJet c : *src) {
                 if (c.pt() > ptMin_) {
                     const std::array<uint64_t, 2> & enc = c.encodedJet();
                     data.push_back(enc[0]);
