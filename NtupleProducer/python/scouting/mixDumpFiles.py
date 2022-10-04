@@ -7,6 +7,7 @@ parser.add_option("--type", dest="dumpType", type=str, default="puppi")
 parser.add_option("-n","--norbits", dest="orbits", type=int, default=100)
 parser.add_option("--bx", dest="nbx", type=int, default=3564, help="BX per orbit")
 parser.add_option("-o","--out", dest="out", type=str, default="dump")
+parser.add_option("--orbit-header","--OH", dest="orbitHeader", default=False, action="store_true")
 options, args = parser.parse_args()
 
 import sys, random
@@ -31,6 +32,18 @@ class PuppiFile:
                     print("Processed %7d entries" % nent)
             self._index = index
             print("File %s with %d events, avg multiplicity %.2f" % (fname,len(index),sumn/float(len(index))));
+    def push(self,lout,rnd,header):
+        if self._fname != None:
+            (n,data) = rnd.choice(self._index)
+            if (n >= 256):
+                print("Warning, cropping event with %d candidates" % n)
+                n = 255
+                data = data[:8*255]
+            header = header | (n & 0xFFF)
+            lout.append(header.to_bytes(8, sys.byteorder))
+            lout.append(data)
+        else:
+            lout.append(header.to_bytes(8, sys.byteorder))
     def write(self,fout,rnd,header):
         if self._fname != None:
             (n,data) = rnd.choice(self._index)
@@ -69,14 +82,34 @@ for iorb in range(options.orbitMux):
 
 run = 0
 for orbit in range(options.orbits):
-    for bx in range(options.nbx):
-        out = outs[(orbit % options.orbitMux) * options.bxMux + (bx % options.bxMux)]
-        header = ((((run << 30) | orbit) << 12) | bx) << 12 
-        u = rnd.random()
-        for (f,t) in samples:
-            if u < t:
-                f.write(out,rnd,header)
-                break
+    if options.orbitHeader:
+        orbitLists = [[] for o in range(options.bxMux)]
+        for bx in range(options.nbx):
+            ibx = bx % options.bxMux
+            header = ((((run << 30) | orbit) << 12) | bx) << 12 
+            u = rnd.random()
+            for (f,t) in samples:
+                if u < t:
+                    f.push(orbitLists[ibx],rnd,header)
+                    break
+        for ibx,data in enumerate(orbitLists):
+            imux = (orbit % options.orbitMux) * options.bxMux + ibx
+            #print("Orbit %d ibx %d of length %d" % (orbit, ibx, sum(len(d)/8 for d in data)))
+            orbitHeader = ((run << 30) | orbit) << 24
+            for d in data: 
+                orbitHeader += len(d)>>3
+            outs[imux].write(orbitHeader.to_bytes(8, sys.byteorder))
+            for d in data: 
+                outs[imux].write(d)
+    else:
+        for bx in range(options.nbx):
+            out = outs[(orbit % options.orbitMux) * options.bxMux + (bx % options.bxMux)]
+            header = ((((run << 30) | orbit) << 12) | bx) << 12 
+            u = rnd.random()
+            for (f,t) in samples:
+                if u < t:
+                    f.write(out,rnd,header)
+                    break
     if orbit % 10 == 9: 
         print("Processed %7d orbits" % (orbit+1))
 
