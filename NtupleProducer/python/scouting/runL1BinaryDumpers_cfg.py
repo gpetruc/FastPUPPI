@@ -70,6 +70,10 @@ process.egDump = cms.EDAnalyzer("L1CTL2EgammaBinaryDumper",
                 interleaveOutputs = cms.bool(False), # False = first 12 photons, then electrons; True = pho1, ele1, pho2, ele2, ...
                 outName = cms.string("egamma.dump"))
 
+process.vertexDump = cms.EDAnalyzer("L1VertexBinaryDumper",
+                src = cms.InputTag("l1tVertexFinderEmulator", "L1VerticesEmulation"),
+                outName = cms.string("vertices.dump"))
+
 process.l1tLayer1HGCalALl = cms.EDProducer("L1TPFCandMultiMerger",
     pfProducers = cms.VInputTag(
         cms.InputTag("l1tLayer1HGCal"),
@@ -98,7 +102,8 @@ process.p_dumps = cms.EndPath(
     process.pfDumpHGCal +
     process.jetDump +
     process.tkMuDump +
-    process.egDump
+    process.egDump +
+    process.vertexDump
 )
 process.p_dumps.associate(process.deps)
 
